@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#1f8a5b">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://world.openfoodfacts.org https://search.openfoodfacts.net https://search.openfoodfacts.org https://generativelanguage.googleapis.com https://*.workers.dev; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Kalorie</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Kalorie">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <!-- DIARY -->
+  <section id="v-diary" class="view on">
+    <header class="top">
+      <div><h1>Diary</h1><div class="sync" id="sync"></div></div>
+      <div class="datenav">
+        <button id="prevDay" aria-label="Previous day">‹</button>
+        <div class="lbl" id="dayLbl">Today</div>
+        <button id="nextDay" aria-label="Next day">›</button>
+      </div>
+    </header>
+    <div class="card">
+      <div class="summary">
+        <div class="ring">
+          <svg width="128" height="128" viewBox="0 0 128 128">
+            <circle cx="64" cy="64" r="54" fill="none" stroke="var(--line)" stroke-width="12"/>
+            <circle id="ringArc" cx="64" cy="64" r="54" fill="none" stroke="var(--acc)" stroke-width="12" stroke-linecap="round" stroke-dasharray="0 340"/>
+          </svg>
+          <div class="mid"><div class="big" id="kLeft">0</div><div class="sm" id="kLeftLbl">kcal left</div></div>
+        </div>
+        <div class="stats" id="macroStats"></div>
+      </div>
+      <div class="eatline">
+        <div><b id="kEaten">0</b>eaten</div>
+        <div><b id="kGoal">0</b>goal</div>
+      </div>
+    </div>
+    <div id="meals"></div>
+  </section>
+
+  <!-- FOODS -->
+  <section id="v-foods" class="view">
+    <header class="top"><h1>My foods</h1></header>
+    <input type="search" id="foodSearch" placeholder="Search your saved products">
+    <div class="row2"><button class="btn sec" id="newFoodBtn">+ New product</button></div>
+    <div class="card list" id="foodList" style="margin-top:12px"></div>
+  </section>
+
+  <!-- PROGRESS -->
+  <section id="v-progress" class="view">
+    <header class="top"><h1>Progress</h1></header>
+    <div class="card">
+      <h2>Weight</h2>
+      <div class="row2">
+        <input type="number" id="wInput" step="0.1" inputmode="decimal" placeholder="Today's weight (kg)">
+        <button class="btn" id="wAdd" style="margin-top:0;flex:0 0 90px">Log</button>
+      </div>
+      <div id="wChart" style="margin-top:12px"></div>
+      <div id="wSummary" class="small muted"></div>
+    </div>
+    <div class="card">
+      <h2>Calories, last 14 days</h2>
+      <div id="kChart"></div>
+      <div id="kSummary" class="small muted"></div>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="v-settings" class="view">
+    <header class="top"><h1>Goals</h1></header>
+    <div class="card">
+      <label class="f">Daily calorie goal (kcal)</label>
+      <input type="number" id="sGoal" inputmode="numeric">
+      <label class="f">Macro split — protein / fat / carbs (%)</label>
+      <div class="grid2" style="grid-template-columns:1fr 1fr 1fr">
+        <input type="number" id="sP" inputmode="numeric">
+        <input type="number" id="sF" inputmode="numeric">
+        <input type="number" id="sC" inputmode="numeric">
+      </div>
+      <div class="small muted" id="sMacroInfo" style="margin-top:6px"></div>
+      <button class="btn" id="sSave">Save goals</button>
+    </div>
+    <div class="card">
+      <details id="calcBox">
+        <summary>Calculate my goal</summary>
+        <div class="grid2">
+          <div><label class="f">Sex</label><select id="cSex"><option value="m">Male</option><option value="f">Female</option></select></div>
+          <div><label class="f">Age</label><input type="number" id="cAge" inputmode="numeric"></div>
+          <div><label class="f">Height (cm)</label><input type="number" id="cH" inputmode="numeric"></div>
+          <div><label class="f">Weight (kg)</label><input type="number" id="cW" step="0.1" inputmode="decimal"></div>
+        </div>
+        <label class="f">Activity</label>
+        <select id="cAct">
+          <option value="1.2">Sedentary (desk job, little exercise)</option>
+          <option value="1.375">Light (exercise 1–3×/week)</option>
+          <option value="1.55">Moderate (exercise 3–5×/week)</option>
+          <option value="1.725">Very active (6–7×/week)</option>
+        </select>
+        <label class="f">Pace</label>
+        <select id="cPace">
+          <option value="0">Maintain weight</option>
+          <option value="275">Lose ~0.25 kg / week</option>
+          <option value="550" selected>Lose ~0.5 kg / week</option>
+          <option value="825">Lose ~0.75 kg / week</option>
+        </select>
+        <div id="cOut"></div>
+      </details>
+    </div>
+    <div class="card">
+      <h2>AI helper (Gemini)</h2>
+      <div class="small muted">Used for photo estimates, reading labels and looking products up online. Everything else works without it. Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. The key is stored only on this phone.</div>
+      <label class="f">API key</label><input type="text" id="aiKey" autocomplete="off" spellcheck="false" placeholder="AIza…">
+      <label class="f">Model</label><input type="text" id="aiModel" spellcheck="false">
+      <label class="f" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="aiSearch"> Let it search Google for products it doesn't know</label>
+      <label class="f" style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" id="aiShare" style="margin-top:3px"> <span>Send my saved foods to Gemini for name matching. When off, matching happens on this phone and Gemini only sees what you type, say or photograph.</span></label>
+      <div class="row2"><button class="btn" id="aiSave">Save</button><button class="btn ghost" id="aiTest">Test</button></div>
+      <div id="aiStatus" class="small" style="margin-top:8px"></div>
+    </div>
+    <div class="card">
+      <h2>Web search</h2>
+      <div class="small muted">Searches the web for a product's nutrition table without leaving the app, using a small free relay on your own Cloudflare account (setup steps are in your private notes). No AI involved.</div>
+      <label class="f">Relay address</label><input type="text" id="rlUrl" autocomplete="off" spellcheck="false" placeholder="https://kalorie-search.yourname.workers.dev">
+      <label class="f">Password (only if you set TOKEN on the relay)</label><input type="text" id="rlTok" autocomplete="off" spellcheck="false">
+      <div class="row2"><button class="btn" id="rlSave">Save</button><button class="btn ghost" id="rlTest">Test</button></div>
+      <div id="rlStatus" class="small" style="margin-top:8px"></div>
+    </div>
+    <div class="card">
+      <h2>Backup</h2>
+      <div class="small muted" id="dataInfo"></div>
+      <div class="row2"><button class="btn ghost" id="exportBtn">Export backup</button><label class="btn ghost filebtn">Import backup<input type="file" accept="application/json,.json,.txt" id="importFile"></label></div>
+      <details style="margin-top:10px"><summary class="small">Paste data instead (e.g. from the Claude version)</summary>
+        <textarea id="importTxt" rows="4" placeholder="Paste the copied JSON here"></textarea>
+        <button class="btn sec" id="importPaste">Import pasted data</button></details>
+    </div>
+  </section>
+</div>
+
+<button class="fab" id="fab">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>
+  Scan</button>
+
+<nav class="tabs">
+  <button data-v="diary" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Diary</button>
+  <button data-v="foods"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16l-1.5 12a2 2 0 0 1-2 1.8h-9A2 2 0 0 1 5.5 19z"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/></svg>Foods</button>
+  <button data-v="progress"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19h16"/><path d="M5 15l4-4 3 3 7-7"/></svg>Progress</button>
+  <button data-v="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg>Goals</button>
+</nav>
+
+<div class="scrim" id="scrim"></div>
+<div class="sheet" id="sheet"><div class="grab"></div><button class="sheetx" id="sheetX" aria-label="Close">✕</button><div id="sheetBody"></div></div>
+<div class="toast" id="toast"></div>
+
+<script src="foods.js"></script>
+<script src="ean.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
