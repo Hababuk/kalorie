@@ -55,7 +55,8 @@ const S={date:today(),day:{date:today(),entries:[]},products:{},profile:null,wei
 const DEF_PROFILE={goal:2000,pp:25,pf:30,pc:45};
 const DEF_MODEL="gemini-3.8-flash";
 const prof=()=>Object.assign({},DEF_PROFILE,S.profile||{});
-const aiOn=()=>!!(S.settings.apiKey||"").trim();
+const aiProvider=()=>S.settings.aiProvider||((S.settings.relayUrl||"").trim()?"cloudflare":"gemini");
+const aiOn=()=>aiProvider()==="cloudflare"?!!(S.settings.relayUrl||"").trim():!!(S.settings.apiKey||"").trim();
 function macroGoals(){const p=prof();return{p:r0(p.goal*p.pp/400),f:r0(p.goal*p.pf/900),c:r0(p.goal*p.pc/400)}}
 function saveProduct(p){S.products[p.id]=p;store.saveProducts()}
 
@@ -93,8 +94,8 @@ $("#meals").addEventListener("click",e=>{const a=e.target.closest("[data-add]");
 
 /* ---------- sheet ---------- */
 let onSheetClose=null;
-function openSheet(html){stopMic();if(onSheetClose){const f=onSheetClose;onSheetClose=null;f()}$("#sheetBody").innerHTML=html;$("#sheet").classList.add("on");$("#scrim").classList.add("on");$("#sheet").scrollTop=0}
-function closeSheet(){stopMic();if(aiCtl)aiCtl.abort();if(onSheetClose){const f=onSheetClose;onSheetClose=null;f()}$("#sheet").classList.remove("on");$("#scrim").classList.remove("on")}
+function openSheet(html){stopMic();$("#sheet").classList.remove("full");if(onSheetClose){const f=onSheetClose;onSheetClose=null;f()}$("#sheetBody").innerHTML=html;$("#sheet").classList.add("on");$("#scrim").classList.add("on");$("#sheet").scrollTop=0}
+function closeSheet(){stopMic();$("#sheet").classList.remove("full");if(aiCtl)aiCtl.abort();if(onSheetClose){const f=onSheetClose;onSheetClose=null;f()}$("#sheet").classList.remove("on");$("#scrim").classList.remove("on")}
 $("#scrim").onclick=closeSheet;$("#sheetX").onclick=closeSheet;
 window.addEventListener("popstate",()=>{if($("#sheet").classList.contains("on"))closeSheet()});
 const loadingHTML=(m,sub)=>`<h3>${esc(m)}</h3><div class="spin"></div>${sub?`<div class="small muted" style="text-align:center">${esc(sub)}</div>`:""}`;
@@ -114,21 +115,28 @@ function localSearch(q){
 /* ---------- add food sheet ---------- */
 function openAddSheet(meal){
   openSheet(`<h3>Add to ${esc(mealName(meal))}</h3>
-    <div class="row2">
-      <button class="btn" id="addScan" style="margin-top:6px">Scan barcode</button>
-      <button class="btn sec" id="addQuick" style="margin-top:6px">🎤 Say / describe</button>
+    <div class="searchbar"><input type="search" id="addSearch" placeholder="Search foods — skyr, banan, Fat Peppa…" autocomplete="off"><button class="btn ghost hidden" id="addDone" style="margin-top:0;flex:0 0 auto;padding:11px 14px">Done</button></div>
+    <div id="addActions">
+      <div class="row2">
+        <button class="btn" id="addScan" style="margin-top:8px">Scan barcode</button>
+        <button class="btn sec" id="addQuick" style="margin-top:8px">🎤 Say / describe</button>
+      </div>
+      <div class="row2">
+        <button class="btn ghost" id="addPhoto" style="margin-top:8px">📷 Photo estimate</button>
+        <button class="btn ghost" id="addMan" style="margin-top:8px">Enter kcal</button>
+      </div>
     </div>
-    <div class="row2">
-      <button class="btn ghost" id="addPhoto" style="margin-top:8px">📷 Photo estimate</button>
-      <button class="btn ghost" id="addMan" style="margin-top:8px">Enter kcal</button>
-    </div>
-    <input type="search" id="addSearch" placeholder="Search foods — skyr, banan, Fat Peppa…" style="margin-top:12px">
     <div id="addList"></div>`);
   $("#addScan").onclick=()=>openScanner(meal);
   $("#addQuick").onclick=()=>{openQuickSheet(meal,"text");const b=$("#sheetBody [data-mic=qTxt]");if(b&&aiOn())b.click()};
   $("#addPhoto").onclick=()=>openQuickSheet(meal,"photo");
   $("#addMan").onclick=()=>openQuickSheet(meal,"man");
-  const s=$("#addSearch"),list=$("#addList");
+  const s=$("#addSearch"),list=$("#addList"),sheet=$("#sheet");
+  // while searching: hide the big buttons and give the sheet the whole screen, so results sit right under the box
+  const setSearching=on=>{sheet.classList.toggle("full",on);$("#addActions").classList.toggle("hidden",on);$("#addDone").classList.toggle("hidden",!on);if(on)sheet.scrollTop=0};
+  s.addEventListener("focus",()=>setSearching(true));
+  s.addEventListener("blur",()=>setTimeout(()=>{if(!s.value.trim()&&document.activeElement!==s)setSearching(false)},150));
+  $("#addDone").onclick=()=>{s.value="";s.blur();setSearching(false);draw()};
   const draw=()=>{
     const q=s.value.trim();
     if(!q){const rec=productsSorted().slice(0,25);list.innerHTML=rec.length?`<div class="secthead">Recent</div><div class="list">${rec.map(prodRow).join("")}</div>`:`<div class="note">Scan a barcode or search to add your first food. Everything you add is saved to My foods for next time.</div>`;return}
@@ -205,8 +213,8 @@ function openProductForm(p,meal){
   openSheet(`<h3>${isNew?"New product":"Edit product"}</h3>
     ${p.barcode?`<div class="small muted">Barcode ${esc(p.barcode)}${isNew&&!p.name&&!p._parsed?" — not found in Open Food Facts":""}</div>`:""}
     ${aiOn()?`<label class="btn sec filebtn">📷 Read values from a label photo<input type="file" accept="image/*" capture="environment" id="lblFile"></label>
-      <div class="small muted" style="margin-top:6px">Gemini reads the per-100 g column and fills the form. Check before saving.</div>`:
-      `<div class="note small">Type the values from the nutrition table (per 100 g).${isNew?" Add a Gemini key in Goals to read labels from a photo.":""}</div>`}
+      <div class="small muted" style="margin-top:6px">The AI reads the per-100 g column and fills the form. Check before saving.</div>`:
+      `<div class="note small">Type the values from the nutrition table (per 100 g).${isNew?" Set up the AI helper in Goals to read labels from a photo.":""}</div>`}
     <div id="lblStatus"></div>
     <label class="f">Name</label><input type="text" id="pN" value="${esc(p.name||"")}" placeholder="e.g. Skyr natural">
     <div class="grid2">
@@ -543,16 +551,41 @@ async function gemini(prompt,{images,search}={}){
     console.warn("Search grounding failed, retrying without search",e);
     const r=await geminiRaw(prompt,images,false);return Object.assign(r,{searched:false,searchError:e.message||e.code})}
 }
+/* ---------- AI via your Cloudflare relay (Workers AI) ---------- */
+async function relayAi(prompt,{images,searchQuery}={}){
+  const base=(S.settings.relayUrl||"").trim().replace(/\/+$/,"");if(!base)throw{code:"no_key"};
+  const signal=aiCtl&&aiCtl.signal;
+  const body={prompt};
+  if(images&&images.length)body.image=await blobToB64(images[0]);
+  if(searchQuery)body.search=searchQuery;
+  const ctl=new AbortController(),onAbort=()=>ctl.abort();if(signal)signal.addEventListener("abort",onAbort,{once:true});
+  const timer=setTimeout(()=>ctl.abort(),70000);
+  let r;
+  try{r=await fetch(base+"/ai"+(S.settings.relayToken?"?t="+encodeURIComponent(S.settings.relayToken):""),{method:"POST",signal:ctl.signal,headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})}
+  catch(e){throw signal&&signal.aborted?{code:"cancelled"}:ctl.signal.aborted?{code:"timeout"}:{code:"network"}}
+  finally{clearTimeout(timer);if(signal)signal.removeEventListener("abort",onAbort)}
+  const j=await r.json().catch(()=>({}));
+  if(r.status===501||j.error==="no_ai_binding")throw{code:"no_binding"};
+  if(r.status===403)throw{code:"api",message:j.error==="wrong token"?"the relay password doesn't match (Goals → Web search)":"the relay refused the request"};
+  if(!r.ok||!j.text)throw{code:"busy",message:(j.details||[]).join("; ")||j.error||("relay error "+r.status)};
+  return{data:parseJSON(j.text),sources:j.sources||[],searched:!!j.searched,searchError:searchQuery&&!j.searched?(j.searchError||"no web results"):null};
+}
+/* one entry point for every AI feature */
+function ai(prompt,{images,search,searchQuery}={}){
+  if(aiProvider()==="cloudflare")return relayAi(prompt,{images,searchQuery:search?searchQuery:null});
+  return gemini(prompt,{images,search});
+}
 function aiErr(e){
   if(!e)return"Something went wrong.";
   if(e.code==="cancelled")return"Cancelled.";
-  if(e.code==="no_key")return"Add your Gemini API key in Goals → AI helper.";
-  if(e.code==="network")return navigator.onLine?"Couldn't reach Gemini.":"You're offline.";
-  if(e.code==="busy"||e.code==="timeout")return"Gemini's free servers are busy right now. Try again in a minute — or use the search or barcode instead.";
-  if(e.code==="rate")return"Gemini's free limit was reached — wait a minute (or until tomorrow) and try again.";
-  if(e.code==="parse"||e.code==="empty")return"Gemini's answer couldn't be read. Try again or rephrase.";
+  if(e.code==="no_key")return aiProvider()==="cloudflare"?"Add your relay address in Goals → Web search.":"Add your Gemini API key in Goals → AI helper.";
+  if(e.code==="no_binding")return"Your relay has no AI yet: in Cloudflare open the worker → Settings → Bindings → Add → Workers AI, name it AI, then Deploy.";
+  if(e.code==="network")return navigator.onLine?(aiProvider()==="cloudflare"?"Couldn't reach your relay.":"Couldn't reach Gemini."):"You're offline.";
+  if(e.code==="busy"||e.code==="timeout")return(aiProvider()==="cloudflare"?"The AI didn't answer"+(e.message?" ("+String(e.message).slice(0,120)+")":"")+".":"Gemini's free servers are busy right now.")+" Try again in a minute — or use the search or barcode instead.";
+  if(e.code==="rate")return"The AI's free limit was reached — wait a minute (or until tomorrow) and try again.";
+  if(e.code==="parse"||e.code==="empty")return"The AI's answer couldn't be read. Try again or rephrase.";
   if(e.status===400&&/API key/i.test(e.message||""))return"Gemini says the API key isn't valid.";
-  return"Gemini error: "+(e.message||e.code);
+  return"AI error: "+(e.message||e.code);
 }
 /* progress UI shared by all AI actions */
 let aiTick=null;
@@ -572,7 +605,7 @@ async function readLabel(file,p){
   const st=$("#lblStatus");startAi(st,"Reading the label…");
   try{
     const img=await toJpeg(await loadImage(file),1800);
-    const{data:j}=await gemini(`You are reading a photo of a food package nutrition table (often Polish: "Wartość energetyczna", "Tłuszcz", "Węglowodany", "w tym cukry", "Błonnik", "Białko", "Sól"; or English/German).
+    const{data:j}=await ai(`You are reading a photo of a food package nutrition table (often Polish: "Wartość energetyczna", "Tłuszcz", "Węglowodany", "w tym cukry", "Błonnik", "Białko", "Sól"; or English/German).
 Return ONLY JSON: {"name":"short product name or null","brand":"brand or null","unit":"g" or "ml","kcal":number,"protein":number,"fat":number,"carbs":number,"serving_size":number or null,"serving_label":"e.g. 1 bar, or null","readable":true/false,"note":"short note or empty"}
 Rules: values PER 100 g (or 100 ml), exactly as printed in the per-100 column. "carbs" = total carbohydrates (Węglowodany), not sugars. If only kJ is shown, kcal = kJ / 4.184. If only per-serving values are printed, convert to per 100 using the serving size. If unreadable, set "readable": false.`,{images:[img]});
     if(j.readable===false||j.kcal==null){st.innerHTML=`<div class="note warn">Couldn't read the label clearly. Try a sharper photo, or type the values.</div>`;return}
@@ -590,19 +623,19 @@ Rules: values PER 100 g (or 100 ml), exactly as printed in the per-100 column. "
 async function webLookupUI(q,meal){
   const out=$("#onlineOut");if(!out)return;startAi(out,"Searching the web…");
   try{
-    const r=await gemini(`Find the official nutrition facts for this food product, as printed on its packaging or published by the restaurant/manufacturer. Product: """${q}"""
+    const r=await ai(`Find the official nutrition facts for this food product, as printed on its packaging or published by the restaurant/manufacturer. Product: """${q}"""
 LANGUAGE: the text may be Polish or English and may come from speech-to-text, so expect phonetic spellings of brand names (e.g. "Xiążulo"/"Ksiązulo" = "Książulo", "fat pepa" = "Fat Peppa"), Polish number words ("sto osiemdziesiąt gram" = 180 g) and Polish units ("deko"/"dag" = 10 g, "łyżka" ≈ 15 g, "łyżeczka" ≈ 5 g, "szklanka" ≈ 250 ml, "kromka" = slice, "kawałek" = piece, "porcja" = portion, "pół" = half). When searching the web, search in Polish as well as English (Polish shops, Żabka, Biedronka, Lidl, manufacturer sites). Write item names in the language the user used.
 Search the web, prefer the manufacturer, retailer product pages, or articles quoting the label.
 Reply with ONLY JSON: {"found":true/false,"name":"product name","brand":"brand","unit":"g" or "ml","kcal":number,"protein":number,"fat":number,"carbs":number,"serving_size":number or null,"serving_label":"e.g. whole pizza, or null","confidence":"high|medium|low","note":"where the values come from, short"}
-Values must be PER 100 g/ml. If the source gives only per-portion values, convert using the portion weight. If you cannot find reliable values, set "found": false.`,{search:true});
+Values must be PER 100 g/ml. If the source gives only per-portion values, convert using the portion weight. If you cannot find reliable values, set "found": false.`,{search:true,searchQuery:q});
     const j=r.data;
-    if(!j.found||j.kcal==null){out.innerHTML=`<div class="note small">Couldn't find reliable values online${r.searched?"":" (web search wasn't available, so this used Gemini's own knowledge)"}. Use a label photo or enter the values.</div>${srcList(r.sources)}`;return}
+    if(!j.found||j.kcal==null){out.innerHTML=`<div class="note small">Couldn't find reliable values online${r.searched?"":" (the web lookup found nothing usable, so this used the AI's own knowledge)"}. Use a label photo or enter the values.</div>${srcList(r.sources)}`;return}
     const p={id:"w-"+uid(),name:j.name||q,brand:j.brand||"",unit:j.unit==="ml"?"ml":"g",kcal:r1(num(j.kcal)),p:r1(num(j.protein)),f:r1(num(j.fat)),c:r1(num(j.carbs)),
       serving:num(j.serving_size)>0?{size:num(j.serving_size),label:j.serving_label||""}:null,source:r.searched?"web":"estimate",updated:Date.now()};
     out.innerHTML=`<div class="card" style="margin-top:10px"><b>${esc(p.name)}</b><div class="small muted">${esc(p.brand)}</div>
       <div class="small" style="margin-top:4px">Per 100 ${p.unit}: <b>${r0(p.kcal)} kcal</b> · P ${p.p} · F ${p.f} · C ${p.c}</div>
       <div class="small muted" style="margin-top:4px">${esc(j.note||"")}${j.confidence?" · confidence: "+esc(j.confidence):""}</div>
-      ${r.searched?"":`<div class="note warn small">Web search wasn't available${r.searchError?" ("+esc(r.searchError).slice(0,120)+")":""}, so these values are from Gemini's memory — treat as an estimate.</div>`}
+      ${r.searched?"":`<div class="note warn small">Web search wasn't available${r.searchError?" ("+esc(r.searchError).slice(0,120)+")":""}, so these values are from the AI's own knowledge — treat as an estimate.</div>`}
       ${srcList(r.sources)}
       <button class="btn" id="wUse">Save to My foods &amp; add</button><button class="btn ghost" id="wEdit">Edit values first</button></div>`;
     $("#wUse").onclick=()=>{saveProduct(p);renderFoods();openAmountSheet(p,meal)};
@@ -645,7 +678,7 @@ function toggleMic(btn,ta){
 const shareFoods=()=>S.settings.shareFoods===true;
 function productDigest(){if(!shareFoods())return"";return productsSorted().slice(0,200).map(p=>`${p.id} | ${p.name}${p.brand?" ("+p.brand+")":""} | per 100 ${p.unit||"g"}: ${r0(p.kcal)} kcal, P ${r1(p.p)}, F ${r1(p.f)}, C ${r1(p.c)}`).join("\n")}
 async function estimateFood(text,img){
-  return gemini(`You help log food in a calorie tracker. The user ${img?"attached a photo of what they are eating and ":""}wrote: """${text||"(no text — use the photo)"}"""
+  return ai(`You help log food in a calorie tracker. The user ${img?"attached a photo of what they are eating and ":""}wrote: """${text||"(no text — use the photo)"}"""
 
 SAVED PRODUCTS (the user's own database, exact label values):
 ${productDigest()||"(not shared — set product_id to null)"}
@@ -657,7 +690,7 @@ Split the food into separate items. For each item:
 3. Else estimate from typical recipes and Polish/European food values: "source":"estimate". Never present a guess as official values.
 If grams are stated, use them exactly; otherwise assume one typical portion. Weights are as eaten.
 Reply with ONLY JSON:
-{"items":[{"name":"short name","brand":"brand or empty","grams":number,"product_id":"id or null","source":"saved|brand|estimate","kcal":number,"protein":number,"fat":number,"carbs":number,"per100":{"kcal":n,"protein":n,"fat":n,"carbs":n} or null}],"note":"one short sentence on what is uncertain, or empty"}`,{images:img?[img]:null,search:!!text});
+{"items":[{"name":"short name","brand":"brand or empty","grams":number,"product_id":"id or null","source":"saved|brand|estimate","kcal":number,"protein":number,"fat":number,"carbs":number,"per100":{"kcal":n,"protein":n,"fat":n,"carbs":n} or null}],"note":"one short sentence on what is uncertain, or empty"}`,{images:img?[img]:null,search:!!text,searchQuery:text});
 }
 const SRC_BADGE={saved:"your food",brand:"brand data",estimate:"estimate"};
 /* match a food name against saved products on the phone (used when the list isn't shared with Gemini) */
@@ -691,7 +724,7 @@ function renderEstimate(out,res,meal){
       ${it.source==="brand"&&it.per?`<label class="small muted" style="display:flex;gap:6px;align-items:center;margin-top:2px"><input type="checkbox" data-save="${n}"${it.save?" checked":""}> save to My foods</label>`:""}</span></label>
       <div style="text-align:right;flex:none"><input type="number" data-g="${n}" value="${r0(it.grams)}" inputmode="decimal" style="width:76px;padding:6px 8px;text-align:right"> <span class="small muted">g</span><div><b>${v.kcal} kcal</b></div></div></div>`}).join("")}</div>
       ${j.note?`<div class="small muted" style="margin-top:6px">${esc(j.note)}</div>`:""}
-      ${res.searchError?`<div class="note warn small">Web search wasn't available on your Gemini key, so branded items are estimates.</div>`:""}
+      ${res.searchError?`<div class="note warn small">The web lookup didn't find usable pages this time, so branded items are estimates.</div>`:""}
       ${srcList(res.sources)}
       <div class="preview"><div><b>${r0(tot.kcal)}</b><span>kcal</span></div><div><b>${r0(tot.p)}</b><span>protein g</span></div><div><b>${r0(tot.f)}</b><span>fat g</span></div><div><b>${r0(tot.c)}</b><span>carbs g</span></div></div>
       <button class="btn" id="qAdd">Add to ${esc(mealName(meal))}</button>`;
@@ -717,7 +750,7 @@ function openQuickSheet(meal,mode){
   mode=mode||"text";
   openSheet(`<h3>Quick add · ${esc(mealName(meal))}</h3>
     <div class="seg"><button data-q="photo">📷 Photo</button><button data-q="text">💬 Describe</button><button data-q="man">Enter kcal</button></div>
-    ${aiOn()?"":`<div class="note small" data-needkey>Photo and Describe need a free Gemini key — add it in Goals → AI helper.</div>`}
+    ${aiOn()?"":`<div class="note small" data-needkey>Photo and Describe need the AI helper — set it up in Goals → AI helper.</div>`}
     <div data-pane="photo" class="hidden">
       <label class="btn sec filebtn" style="margin-top:8px">Take or choose a photo of your food<input type="file" accept="image/*" capture="environment" id="qImg"></label>
       <img id="qThumb" class="hidden" style="width:100%;max-height:220px;object-fit:cover;border-radius:12px;margin-top:10px" alt="">
@@ -817,6 +850,7 @@ function renderSettings(){
   if(p.calc){$("#cSex").value=p.calc.sex;$("#cAge").value=p.calc.age;$("#cH").value=p.calc.h;$("#cW").value=p.calc.w;$("#cAct").value=p.calc.act;$("#cPace").value=p.calc.pace}
   else{const wl=S.weights.list||[];if(wl.length)$("#cW").value=wl[wl.length-1].kg;$("#calcBox").open=true}
   calc();
+  $("#aiProv").value=aiProvider();$("#gemFields").classList.toggle("hidden",aiProvider()!=="gemini");
   $("#aiKey").value=S.settings.apiKey||"";$("#aiModel").value=S.settings.model||DEF_MODEL;$("#aiSearch").checked=S.settings.search!==false;$("#rlUrl").value=S.settings.relayUrl||"";$("#rlTok").value=S.settings.relayToken||"";$("#aiShare").checked=shareFoods();
   updateDataInfo();
 }
@@ -850,9 +884,16 @@ function calc(){
   $("#cUse").onclick=()=>{S.profile=Object.assign(prof(),{goal:target,calc:{sex,age,h,w,act,pace}});store.saveProfile(S.profile);renderSettings();renderDiary();toast("Goal set to "+target+" kcal")};
 }
 ["#cSex","#cAge","#cH","#cW","#cAct","#cPace"].forEach(id=>$(id).addEventListener("input",calc));
-$("#aiSave").onclick=()=>{S.settings=Object.assign({},S.settings,{apiKey:$("#aiKey").value.trim(),model:$("#aiModel").value.trim()||DEF_MODEL,search:$("#aiSearch").checked,shareFoods:$("#aiShare").checked,searchOffUntil:0});store.saveSettings(S.settings);toast("AI settings saved")};
+$("#aiProv").onchange=()=>{$("#aiProv").dataset.touched="1";$("#gemFields").classList.toggle("hidden",$("#aiProv").value!=="gemini")};
+$("#aiSave").onclick=()=>{S.settings=Object.assign({},S.settings,$("#aiProv").dataset.touched?{aiProvider:$("#aiProv").value}:{},{apiKey:$("#aiKey").value.trim(),model:$("#aiModel").value.trim()||DEF_MODEL,search:$("#aiSearch").checked,shareFoods:$("#aiShare").checked,searchOffUntil:0});store.saveSettings(S.settings);toast("AI settings saved")};
 $("#aiTest").onclick=async()=>{
   $("#aiSave").onclick();const st=$("#aiStatus");st.textContent="Testing…";
+  if(aiProvider()==="cloudflare"){
+    if(!(S.settings.relayUrl||"").trim()){st.innerHTML=`<span style="color:var(--warn)">Add your relay address under Web search first.</span>`;return}
+    try{await relayAi('Reply with only this JSON: {"ok":true}');st.innerHTML='<span style="color:var(--acc)">✓ Cloudflare AI works.</span> Photo estimates, label reading and describe are on.'}
+    catch(e){st.innerHTML=`<span style="color:var(--warn)">${esc(aiErr(e))}</span>`}
+    return;
+  }
   try{await geminiRaw('Reply with only this JSON: {"ok":true}',null,false);st.innerHTML='<span style="color:var(--acc)">✓ Gemini works.</span> Checking web search…';
     try{await geminiRaw('Use Google Search to find today\'s date. Reply with only JSON: {"date":"YYYY-MM-DD"}',null,true);st.innerHTML='<span style="color:var(--acc)">✓ Gemini works, including web search.</span>'}
     catch(e){st.innerHTML=`<span style="color:var(--acc)">✓ Gemini works</span>, but web search isn't available on this key/model (${esc(e.message||e.code).slice(0,140)}). Lookups will use Gemini's own knowledge and be marked as estimates.`}}
@@ -860,7 +901,8 @@ $("#aiTest").onclick=async()=>{
 };
 
 $("#rlSave").onclick=()=>{let u=$("#rlUrl").value.trim();if(u&&!/^https:\/\//.test(u))u="https://"+u;
-  S.settings=Object.assign({},S.settings,{relayUrl:u,relayToken:$("#rlTok").value.trim()});store.saveSettings(S.settings);$("#rlUrl").value=u;toast("Web search settings saved")};
+  S.settings=Object.assign({},S.settings,{relayUrl:u,relayToken:$("#rlTok").value.trim()});store.saveSettings(S.settings);$("#rlUrl").value=u;toast("Web search settings saved");
+  if(!$("#aiProv").dataset.touched){$("#aiProv").value=aiProvider();$("#gemFields").classList.toggle("hidden",aiProvider()!=="gemini")}};
 $("#rlTest").onclick=async()=>{$("#rlSave").onclick();const st=$("#rlStatus");if(!relayOn()){st.textContent="Paste your relay address first.";return}
   st.textContent="Testing…";
   try{const res=await relaySearch("skyr naturalny");const n=res.filter(r=>parseNutrition((r.text||"")+"\n"+(r.snippet||"")).kcal!=null).length;

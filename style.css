@@ -109,3 +109,12 @@ textarea{width:100%;padding:11px 12px;border-radius:12px;border:1px solid var(--
 .sheet{position:fixed}.sheetx{position:absolute;top:8px;right:10px;width:34px;height:34px;border-radius:50%;background:var(--bg);color:var(--mute);font-size:15px;z-index:2}
 .mic.on{background:var(--warn);color:#fff;animation:pulse 1.2s ease-in-out infinite}@keyframes pulse{50%{opacity:.75}}
 @media (prefers-color-scheme:dark){.meal .mh h3{color:color-mix(in srgb,var(--mc) 45%,var(--ink))}.meal .mk{color:color-mix(in srgb,var(--mc) 40%,var(--ink))}.meal .mh{background:color-mix(in srgb,var(--mc) 22%,var(--card))}}
+.searchbar{display:flex;gap:8px;align-items:center;margin-top:8px;position:sticky;top:-8px;z-index:3;background:var(--card);padding:6px 0}
+.sheet.full{top:0;max-height:none;border-radius:0;padding-top:max(8px,env(safe-area-inset-top))}
+.sheet.full .grab{display:none}
+.sheet.full #addList .list .it{padding:12px 2px}
+.foodshead{display:flex;align-items:center;justify-content:space-between}
+.foodshead .btn{width:auto;margin-top:0;padding:9px 14px}
+.searchbar input{flex:1 1 auto;min-width:0;width:auto}
+.searchbar .btn{width:auto;flex:0 0 auto}
+.sheet.full .searchbar{margin-right:44px}

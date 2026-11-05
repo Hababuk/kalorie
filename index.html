@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, interactive-widget=resizes-content">
 <meta name="theme-color" content="#1f8a5b">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://world.openfoodfacts.org https://search.openfoodfacts.net https://search.openfoodfacts.org https://generativelanguage.googleapis.com https://*.workers.dev; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Kalorie</title>
@@ -49,10 +49,9 @@
 
   <!-- FOODS -->
   <section id="v-foods" class="view">
-    <header class="top"><h1>My foods</h1></header>
-    <input type="search" id="foodSearch" placeholder="Search your saved products">
-    <div class="row2"><button class="btn sec" id="newFoodBtn">+ New product</button></div>
-    <div class="card list" id="foodList" style="margin-top:12px"></div>
+    <header class="top foodshead"><h1>My foods</h1><button class="btn sec" id="newFoodBtn">+ New product</button></header>
+    <input type="search" id="foodSearch" placeholder="Search your saved products" autocomplete="off">
+    <div class="card list" id="foodList" style="margin-top:8px"></div>
   </section>
 
   <!-- PROGRESS -->
@@ -116,18 +115,23 @@
       </details>
     </div>
     <div class="card">
-      <h2>AI helper (Gemini)</h2>
-      <div class="small muted">Used for photo estimates, reading labels and looking products up online. Everything else works without it. Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. The key is stored only on this phone.</div>
-      <label class="f">API key</label><input type="text" id="aiKey" autocomplete="off" spellcheck="false" placeholder="AIza…">
-      <label class="f">Model</label><input type="text" id="aiModel" spellcheck="false">
-      <label class="f" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="aiSearch"> Let it search Google for products it doesn't know</label>
-      <label class="f" style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" id="aiShare" style="margin-top:3px"> <span>Send my saved foods to Gemini for name matching. When off, matching happens on this phone and Gemini only sees what you type, say or photograph.</span></label>
+      <h2>AI helper</h2>
+      <div class="small muted">Used for photo estimates, reading labels from a photo and “Say / describe”. Everything else works without it.</div>
+      <label class="f">Use</label>
+      <select id="aiProv"><option value="cloudflare">Cloudflare AI through my relay (free, recommended)</option><option value="gemini">Google Gemini (own API key)</option></select>
+      <div class="small muted" style="margin-top:6px">Cloudflare AI runs on the same free relay as Web search below — it only needs the “AI” binding added once (see your private setup notes). It looks things up on the web itself.</div>
+      <div id="gemFields" class="hidden">
+        <label class="f">Gemini API key</label><input type="text" id="aiKey" autocomplete="off" spellcheck="false" placeholder="AIza…">
+        <label class="f">Model</label><input type="text" id="aiModel" spellcheck="false">
+        <label class="f" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="aiSearch"> Let it search Google for products it doesn't know</label>
+      </div>
+      <label class="f" style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" id="aiShare" style="margin-top:3px"> <span>Send my saved foods to the AI for name matching. When off, matching happens on this phone and the AI only sees what you type, say or photograph.</span></label>
       <div class="row2"><button class="btn" id="aiSave">Save</button><button class="btn ghost" id="aiTest">Test</button></div>
       <div id="aiStatus" class="small" style="margin-top:8px"></div>
     </div>
     <div class="card">
       <h2>Web search</h2>
-      <div class="small muted">Searches the web for a product's nutrition table without leaving the app, using a small free relay on your own Cloudflare account (setup steps are in your private notes). No AI involved.</div>
+      <div class="small muted">Searches the web for a product's nutrition table without leaving the app, using a small free relay on your own Cloudflare account (setup steps are in your private notes).</div>
       <label class="f">Relay address</label><input type="text" id="rlUrl" autocomplete="off" spellcheck="false" placeholder="https://kalorie-search.yourname.workers.dev">
       <label class="f">Password (only if you set TOKEN on the relay)</label><input type="text" id="rlTok" autocomplete="off" spellcheck="false">
       <div class="row2"><button class="btn" id="rlSave">Save</button><button class="btn ghost" id="rlTest">Test</button></div>
