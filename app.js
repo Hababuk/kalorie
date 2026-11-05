@@ -53,10 +53,8 @@ const store={
 /* ---------- state ---------- */
 const S={date:today(),day:{date:today(),entries:[]},products:{},profile:null,weights:{list:[]},settings:{}};
 const DEF_PROFILE={goal:2000,pp:25,pf:30,pc:45};
-const DEF_MODEL="gemini-3.8-flash";
 const prof=()=>Object.assign({},DEF_PROFILE,S.profile||{});
-const aiProvider=()=>S.settings.aiProvider||((S.settings.relayUrl||"").trim()?"cloudflare":"gemini");
-const aiOn=()=>aiProvider()==="cloudflare"?!!(S.settings.relayUrl||"").trim():!!(S.settings.apiKey||"").trim();
+const aiOn=()=>!!(S.settings.relayUrl||"").trim();   // AI runs on your Cloudflare relay
 function macroGoals(){const p=prof();return{p:r0(p.goal*p.pp/400),f:r0(p.goal*p.pf/900),c:r0(p.goal*p.pc/400)}}
 function saveProduct(p){S.products[p.id]=p;store.saveProducts()}
 
@@ -473,86 +471,14 @@ async function relayUI(q,meal){
   }finally{clearInterval(tick)}
 }
 
-/* ---------- Gemini ---------- */
+/* ---------- AI helpers ---------- */
 function parseJSON(t){t=String(t||"").replace(/```(?:json)?/g,"");const a=t.indexOf("{"),b=t.lastIndexOf("}");if(a<0||b<a)throw{code:"parse"};return JSON.parse(t.slice(a,b+1))}
 /* one AbortController per AI action, so the user can cancel */
 let aiCtl=null;
 const sleep=(ms,sig)=>new Promise((res,rej)=>{const t=setTimeout(res,ms);if(sig)sig.addEventListener("abort",()=>{clearTimeout(t);rej({code:"cancelled"})},{once:true})});
-const isBusy=e=>e&&(e.status===503||e.status===500||e.status===504||e.code==="timeout"||/high demand|overloaded|unavailable|try again later/i.test(e.message||""));
-let modelListP=null;
-function listModels(){
-  if(!modelListP)modelListP=fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",{headers:{"x-goog-api-key":S.settings.apiKey.trim()}})
-    .then(r=>r.ok?r.json():{models:[]}).then(j=>(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes("generateContent")).map(m=>m.name.replace(/^models\//,"")))
-    .catch(()=>{modelListP=null;return[]});
-  return modelListP;
-}
-/* lighter/other Flash models to try when the main one is overloaded */
-async function fallbackModels(current){
-  const vnum=n=>parseFloat((/gemini-([\d.]+)/.exec(n)||[0,0])[1])||0;
-  const names=(await listModels()).filter(n=>/^gemini-[\d.]+-flash(-lite)?$/.test(n)&&n!==current);
-  return names.sort((x,y)=>(vnum(y)-vnum(x))||((/lite/.test(y)?1:0)-(/lite/.test(x)?1:0))).slice(0,2);
-}
-async function geminiCall(model,body,signal){
-  const ctl=new AbortController(),onAbort=()=>ctl.abort();
-  if(signal){if(signal.aborted)throw{code:"cancelled"};signal.addEventListener("abort",onAbort,{once:true})}
-  const timer=setTimeout(()=>ctl.abort("timeout"),50000);
-  let r;
-  try{r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:"POST",signal:ctl.signal,headers:{"Content-Type":"application/json","x-goog-api-key":S.settings.apiKey.trim()},body:JSON.stringify(body)})}
-  catch(e){throw signal&&signal.aborted?{code:"cancelled"}:ctl.signal.aborted?{code:"timeout",message:"took too long"}:{code:"network"}}
-  finally{clearTimeout(timer);if(signal)signal.removeEventListener("abort",onAbort)}
-  const j=await r.json().catch(()=>({}));
-  if(!r.ok)throw{code:r.status===429?"rate":"api",status:r.status,message:(j.error&&j.error.message)||("HTTP "+r.status)};
-  const c=j.candidates&&j.candidates[0];
-  const text=((c&&c.content&&c.content.parts)||[]).map(p=>p.text||"").join("");
-  if(!text)throw{code:"empty",message:(c&&c.finishReason)||"no answer"};
-  const sources=(((c&&c.groundingMetadata)||{}).groundingChunks||[]).map(g=>g.web).filter(w=>w&&w.uri);
-  return{data:parseJSON(text),sources};
-}
-async function geminiRaw(prompt,images,search){
-  if(!aiOn())throw{code:"no_key"};
-  const signal=aiCtl&&aiCtl.signal;
-  const parts=[{text:prompt}];
-  for(const b of images||[])parts.push({inline_data:{mime_type:"image/jpeg",data:await blobToB64(b)}});
-  const body={contents:[{role:"user",parts}],generationConfig:{temperature:0.2}};
-  if(search)body.tools=[{google_search:{}}];else body.generationConfig.responseMimeType="application/json";
-  let model=(S.settings.model||DEF_MODEL).trim().replace(/^models\//,"");
-  try{return await geminiCall(model,body,signal)}
-  catch(e){
-    if(e.code==="cancelled"||e.code==="network")throw e;
-    // 1) retired model with a named replacement → switch for good
-    const mm=/(?:use|to)\s+(?:models\/)?(gemini-[\w.\-]+)/i.exec(e.message||"");
-    const repl=mm&&mm[1].replace(/[.\-]+$/,"");
-    if(repl&&repl!==model&&e.status!==429&&/no longer available|deprecated|not found|retired|update your code/i.test(e.message||"")){
-      S.settings=Object.assign({},S.settings,{model:repl});store.saveSettings(S.settings);
-      const f=$("#aiModel");if(f)f.value=repl;toast("Switched AI model to "+repl);
-      return geminiCall(repl,body,signal);
-    }
-    if(!isBusy(e))throw e;
-    // 2) overloaded → wait and retry once, then try lighter models
-    setAiStatus("Gemini is busy — retrying…");
-    await sleep(2000,signal);
-    try{return await geminiCall(model,body,signal)}catch(e2){if(!isBusy(e2))throw e2}
-    for(const fb of await fallbackModels(model)){
-      setAiStatus("Gemini is busy — trying "+fb+"…");
-      try{return await geminiCall(fb,body,signal)}catch(e3){if(e3.code==="cancelled")throw e3}
-    }
-    throw{code:"busy",message:e.message};
-  }
-}
-async function gemini(prompt,{images,search}={}){
-  const until=S.settings.searchOffUntil||0;
-  const wantSearch=search&&S.settings.search!==false&&Date.now()>until;
-  if(!wantSearch)return Object.assign(await geminiRaw(prompt,images,false),{searched:false,searchError:search&&S.settings.search!==false&&until?"not available on this key":null});
-  try{return Object.assign(await geminiRaw(prompt,images,true),{searched:true})}
-  catch(e){
-    if(["network","no_key","cancelled","busy"].includes(e.code))throw e;
-    // search not allowed on this key/model: remember for a day so we don't waste time and quota
-    S.settings=Object.assign({},S.settings,{searchOffUntil:Date.now()+864e5});store.saveSettings(S.settings);
-    console.warn("Search grounding failed, retrying without search",e);
-    const r=await geminiRaw(prompt,images,false);return Object.assign(r,{searched:false,searchError:e.message||e.code})}
-}
+
 /* ---------- AI via your Cloudflare relay (Workers AI) ---------- */
-async function relayAi(prompt,{images,searchQuery}={}){
+async function relayAiOnce(prompt,{images,searchQuery}={}){
   const base=(S.settings.relayUrl||"").trim().replace(/\/+$/,"");if(!base)throw{code:"no_key"};
   const signal=aiCtl&&aiCtl.signal;
   const body={prompt};
@@ -570,21 +496,22 @@ async function relayAi(prompt,{images,searchQuery}={}){
   if(!r.ok||!j.text)throw{code:"busy",message:(j.details||[]).join("; ")||j.error||("relay error "+r.status)};
   return{data:parseJSON(j.text),sources:j.sources||[],searched:!!j.searched,searchError:searchQuery&&!j.searched?(j.searchError||"no web results"):null};
 }
-/* one entry point for every AI feature */
-function ai(prompt,{images,search,searchQuery}={}){
-  if(aiProvider()==="cloudflare")return relayAi(prompt,{images,searchQuery:search?searchQuery:null});
-  return gemini(prompt,{images,search});
+/* if both AI models were busy, wait a moment and try once more */
+async function relayAi(prompt,opts={}){
+  try{return await relayAiOnce(prompt,opts)}
+  catch(e){if(e.code!=="busy")throw e;setAiStatus("The AI is busy — trying again…");await sleep(2500,aiCtl&&aiCtl.signal);return relayAiOnce(prompt,opts)}
 }
+/* one entry point for every AI feature */
+function ai(prompt,{images,search,searchQuery}={}){return relayAi(prompt,{images,searchQuery:search?searchQuery:null})}
 function aiErr(e){
   if(!e)return"Something went wrong.";
   if(e.code==="cancelled")return"Cancelled.";
-  if(e.code==="no_key")return aiProvider()==="cloudflare"?"Add your relay address in Goals → Web search.":"Add your Gemini API key in Goals → AI helper.";
+  if(e.code==="no_key")return"Add your relay address in Goals → Relay.";
   if(e.code==="no_binding")return"Your relay has no AI yet: in Cloudflare open the worker → Settings → Bindings → Add → Workers AI, name it AI, then Deploy.";
-  if(e.code==="network")return navigator.onLine?(aiProvider()==="cloudflare"?"Couldn't reach your relay.":"Couldn't reach Gemini."):"You're offline.";
-  if(e.code==="busy"||e.code==="timeout")return(aiProvider()==="cloudflare"?"The AI didn't answer"+(e.message?" ("+String(e.message).slice(0,120)+")":"")+".":"Gemini's free servers are busy right now.")+" Try again in a minute — or use the search or barcode instead.";
+  if(e.code==="network")return navigator.onLine?"Couldn't reach your relay.":"You're offline.";
+  if(e.code==="busy"||e.code==="timeout")return"The AI didn't answer"+(e.message?" ("+String(e.message).slice(0,120)+")":"")+". Try again in a minute — or use the search or barcode instead.";
   if(e.code==="rate")return"The AI's free limit was reached — wait a minute (or until tomorrow) and try again.";
   if(e.code==="parse"||e.code==="empty")return"The AI's answer couldn't be read. Try again or rephrase.";
-  if(e.status===400&&/API key/i.test(e.message||""))return"Gemini says the API key isn't valid.";
   return"AI error: "+(e.message||e.code);
 }
 /* progress UI shared by all AI actions */
@@ -693,7 +620,7 @@ Reply with ONLY JSON:
 {"items":[{"name":"short name","brand":"brand or empty","grams":number,"product_id":"id or null","source":"saved|brand|estimate","kcal":number,"protein":number,"fat":number,"carbs":number,"per100":{"kcal":n,"protein":n,"fat":n,"carbs":n} or null}],"note":"one short sentence on what is uncertain, or empty"}`,{images:img?[img]:null,search:!!text,searchQuery:text});
 }
 const SRC_BADGE={saved:"your food",brand:"brand data",estimate:"estimate"};
-/* match a food name against saved products on the phone (used when the list isn't shared with Gemini) */
+/* match a food name against saved products on the phone (used when the list isn't shared with the AI) */
 function localMatch(name){
   const toks=x=>norm(x).replace(/\(.*?\)/g," ").split(/[^a-z0-9]+/).filter(t=>t.length>=3);
   const q=toks(name);if(!q.length)return null;
@@ -850,8 +777,7 @@ function renderSettings(){
   if(p.calc){$("#cSex").value=p.calc.sex;$("#cAge").value=p.calc.age;$("#cH").value=p.calc.h;$("#cW").value=p.calc.w;$("#cAct").value=p.calc.act;$("#cPace").value=p.calc.pace}
   else{const wl=S.weights.list||[];if(wl.length)$("#cW").value=wl[wl.length-1].kg;$("#calcBox").open=true}
   calc();
-  $("#aiProv").value=aiProvider();$("#gemFields").classList.toggle("hidden",aiProvider()!=="gemini");
-  $("#aiKey").value=S.settings.apiKey||"";$("#aiModel").value=S.settings.model||DEF_MODEL;$("#aiSearch").checked=S.settings.search!==false;$("#rlUrl").value=S.settings.relayUrl||"";$("#rlTok").value=S.settings.relayToken||"";$("#aiShare").checked=shareFoods();
+  $("#rlUrl").value=S.settings.relayUrl||"";$("#rlTok").value=S.settings.relayToken||"";$("#aiShare").checked=shareFoods();
   updateDataInfo();
 }
 async function updateDataInfo(){
@@ -884,25 +810,17 @@ function calc(){
   $("#cUse").onclick=()=>{S.profile=Object.assign(prof(),{goal:target,calc:{sex,age,h,w,act,pace}});store.saveProfile(S.profile);renderSettings();renderDiary();toast("Goal set to "+target+" kcal")};
 }
 ["#cSex","#cAge","#cH","#cW","#cAct","#cPace"].forEach(id=>$(id).addEventListener("input",calc));
-$("#aiProv").onchange=()=>{$("#aiProv").dataset.touched="1";$("#gemFields").classList.toggle("hidden",$("#aiProv").value!=="gemini")};
-$("#aiSave").onclick=()=>{S.settings=Object.assign({},S.settings,$("#aiProv").dataset.touched?{aiProvider:$("#aiProv").value}:{},{apiKey:$("#aiKey").value.trim(),model:$("#aiModel").value.trim()||DEF_MODEL,search:$("#aiSearch").checked,shareFoods:$("#aiShare").checked,searchOffUntil:0});store.saveSettings(S.settings);toast("AI settings saved")};
+$("#aiSave").onclick=()=>{S.settings=Object.assign({},S.settings,{shareFoods:$("#aiShare").checked});store.saveSettings(S.settings);toast("Saved")};
 $("#aiTest").onclick=async()=>{
-  $("#aiSave").onclick();const st=$("#aiStatus");st.textContent="Testing…";
-  if(aiProvider()==="cloudflare"){
-    if(!(S.settings.relayUrl||"").trim()){st.innerHTML=`<span style="color:var(--warn)">Add your relay address under Web search first.</span>`;return}
-    try{await relayAi('Reply with only this JSON: {"ok":true}');st.innerHTML='<span style="color:var(--acc)">✓ Cloudflare AI works.</span> Photo estimates, label reading and describe are on.'}
-    catch(e){st.innerHTML=`<span style="color:var(--warn)">${esc(aiErr(e))}</span>`}
-    return;
-  }
-  try{await geminiRaw('Reply with only this JSON: {"ok":true}',null,false);st.innerHTML='<span style="color:var(--acc)">✓ Gemini works.</span> Checking web search…';
-    try{await geminiRaw('Use Google Search to find today\'s date. Reply with only JSON: {"date":"YYYY-MM-DD"}',null,true);st.innerHTML='<span style="color:var(--acc)">✓ Gemini works, including web search.</span>'}
-    catch(e){st.innerHTML=`<span style="color:var(--acc)">✓ Gemini works</span>, but web search isn't available on this key/model (${esc(e.message||e.code).slice(0,140)}). Lookups will use Gemini's own knowledge and be marked as estimates.`}}
+  const st=$("#aiStatus");
+  if(!relayOn()){st.innerHTML=`<span style="color:var(--warn)">Add your relay address above first.</span>`;return}
+  st.textContent="Testing…";
+  try{await relayAiOnce('Reply with only this JSON: {"ok":true}');st.innerHTML='<span style="color:var(--acc)">✓ AI works.</span> Photo estimates, label reading and describe are on.'}
   catch(e){st.innerHTML=`<span style="color:var(--warn)">${esc(aiErr(e))}</span>`}
 };
 
 $("#rlSave").onclick=()=>{let u=$("#rlUrl").value.trim();if(u&&!/^https:\/\//.test(u))u="https://"+u;
-  S.settings=Object.assign({},S.settings,{relayUrl:u,relayToken:$("#rlTok").value.trim()});store.saveSettings(S.settings);$("#rlUrl").value=u;toast("Web search settings saved");
-  if(!$("#aiProv").dataset.touched){$("#aiProv").value=aiProvider();$("#gemFields").classList.toggle("hidden",aiProvider()!=="gemini")}};
+  S.settings=Object.assign({},S.settings,{relayUrl:u,relayToken:$("#rlTok").value.trim()});store.saveSettings(S.settings);$("#rlUrl").value=u;toast("Relay settings saved")};
 $("#rlTest").onclick=async()=>{$("#rlSave").onclick();const st=$("#rlStatus");if(!relayOn()){st.textContent="Paste your relay address first.";return}
   st.textContent="Testing…";
   try{const res=await relaySearch("skyr naturalny");const n=res.filter(r=>parseNutrition((r.text||"")+"\n"+(r.snippet||"")).kcal!=null).length;
@@ -967,6 +885,7 @@ function handleShare(){
   try{
     const[pr,ps,ws,st]=await Promise.all([store.profile(),store.products(),store.weights(),store.settings()]);
     S.profile=pr;S.products=ps||{};S.weights=ws||{list:[]};S.settings=st||{};
+    if("apiKey" in S.settings||"aiProvider" in S.settings){["apiKey","model","search","searchOffUntil","aiProvider"].forEach(k=>delete S.settings[k]);store.saveSettings(S.settings)}
   }catch(e){toast("Couldn't open saved data")}
   await loadDay(today());
   handleShare();
